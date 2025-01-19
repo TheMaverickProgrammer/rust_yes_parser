@@ -3,14 +3,14 @@ use std::str::FromStr;
 use crate::keyval::KeyVal;
 
 pub struct Element {
-    text: String,
-    args: Vec<KeyVal>,
+    pub text: String,
+    pub args: Vec<KeyVal>,
 }
 
 impl Element {
     pub fn new(text: String) -> Element {
         Element {
-            text: text,
+            text,
             args: Vec::new(),
         }
     }

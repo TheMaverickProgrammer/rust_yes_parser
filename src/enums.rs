@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::{element::Element, keyval::KeyVal};
 
 #[derive(PartialEq)]
@@ -44,12 +46,50 @@ impl Elements {
         Elements::Comment(Element::new(message))
     }
 
+    pub fn copy(other: &Element) -> Element {
+        let mut args = Vec::new();
+        for kv in &other.args {
+            args.push(KeyVal::copy(&kv));
+        }
+        Element {
+            text: other.text.clone(),
+            args,
+        }
+    }
+
     pub fn upsert_keyval(&mut self, keyval: KeyVal) {
         match self {
             Elements::Standard { data, .. } => data.upsert(keyval),
             Elements::Attribute(data) => data.upsert(keyval),
             Elements::Global(data) => data.upsert(keyval),
             Elements::Comment(data) => data.upsert(keyval),
+        }
+    }
+}
+
+impl fmt::Display for Elements {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (glyph, element) = match self {
+            Elements::Standard { data, .. } => (Glyphs::None, data),
+            Elements::Attribute(data) => (Glyphs::At, data),
+            Elements::Global(data) => (Glyphs::Bang, data),
+            Elements::Comment(data) => (Glyphs::Hash, data),
+        };
+
+        let char_glyph = glyph.value() as char;
+        if element.args.is_empty() {
+            write!(f, "{}{}", char_glyph, element.text)
+        } else {
+            let args_len = element.args.len();
+            let mut args = String::new();
+            for i in 0..args_len {
+                args += &element.args[i].to_string();
+                if i < args_len - 1 {
+                    args += ", ";
+                }
+            }
+
+            write!(f, "{}{} {}", char_glyph, element.text, args)
         }
     }
 }
@@ -64,6 +104,7 @@ pub enum Glyphs {
     Space,
     Comma,
     Quote,
+    Backslash,
 }
 
 impl Glyphs {
@@ -77,6 +118,7 @@ impl Glyphs {
             Glyphs::None => 0,
             Glyphs::Quote => '"' as u8,
             Glyphs::Space => ' ' as u8,
+            Glyphs::Backslash => '\\' as u8,
         }
     }
 
@@ -89,6 +131,7 @@ impl Glyphs {
             val if val == '#' as u8 => Glyphs::Hash,
             val if val == '"' as u8 => Glyphs::Quote,
             val if val == ' ' as u8 => Glyphs::Space,
+            val if val == '\\' as u8 => Glyphs::Backslash,
             _ => Glyphs::None,
         }
     }

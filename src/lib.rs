@@ -1,11 +1,131 @@
+use element::Element;
+use element_parser::ElementParser;
+use enums::{Elements, ErrorCodes, Glyphs};
+use literal::Literal;
+
 pub mod element;
+pub mod element_parser;
 pub mod enums;
 pub mod keyval;
-pub mod parser;
+pub mod literal;
 pub mod utils;
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+pub struct ParsedElement {
+    line_number: usize,
+    data: Elements,
+}
+
+impl ParsedElement {
+    pub fn new(line_number: usize, data: Elements) -> ParsedElement {
+        ParsedElement { line_number, data }
+    }
+}
+
+pub struct LineError {
+    line_number: usize,
+    message: String,
+    code: ErrorCodes,
+}
+
+impl LineError {
+    pub fn from_error_code(line_number: usize, code: ErrorCodes) -> LineError {
+        LineError {
+            line_number,
+            message: code.values().to_owned(),
+            code,
+        }
+    }
+
+    pub fn custom(line_number: usize, message: String) -> LineError {
+        LineError {
+            line_number,
+            message,
+            code: ErrorCodes::Runtime,
+        }
+    }
+}
+pub struct YesDocParser {
+    pub total_lines: usize,
+    building_line: Option<String>,
+    attrs: Vec<Element>,
+    pub parsed_elements: Vec<ParsedElement>,
+    pub errors: Vec<LineError>,
+}
+
+impl YesDocParser {
+    pub fn from_string(body: &str, literals: Option<Vec<Literal>>) -> YesDocParser {
+        todo!()
+    }
+
+    fn organize(&mut self) {
+        // Hoist globals to the top of the list in order they were entered.
+        self.parsed_elements
+            .sort_by(|a, b| match (&a.data, &b.data) {
+                (Elements::Global(g1), Elements::Global(g2)) => a.line_number.cmp(&b.line_number),
+                (Elements::Global(_), _) => std::cmp::Ordering::Less,
+                (_, Elements::Global(_)) => std::cmp::Ordering::Greater,
+                _ => a.line_number.cmp(&b.line_number),
+            });
+    }
+
+    fn process(&mut self, line: &mut String, literals: Option<Vec<Literal>>) {
+        self.total_lines += 1;
+
+        let backslash = Glyphs::Backslash.value() as char;
+        if line.ends_with(backslash) {
+            *line = line.replace(backslash, "");
+
+            if let Some(ref mut str) = self.building_line {
+                *str += &line;
+            } else {
+                self.building_line = Some(line.clone());
+            }
+
+            return;
+        } else if let Some(ref mut str) = self.building_line {
+            *line += str;
+            self.building_line = None;
+        }
+
+        let mut element_parser = ElementParser::read(self.total_lines, line, literals);
+
+        if !element_parser.is_ok() {
+            self.errors.push(LineError::from_error_code(
+                element_parser.line_number,
+                element_parser.error.unwrap(),
+            ));
+        }
+
+        let consumed = match element_parser.element {
+            Some(Elements::Attribute(ref data)) => {
+                self.attrs.push(Elements::copy(data));
+                true
+            }
+            Some(Elements::Standard {
+                ref mut attrs,
+                data: _,
+            }) => {
+                for a in &self.attrs {
+                    attrs.push(Elements::copy(a));
+                }
+
+                self.attrs.clear();
+                false
+            }
+            _ => false,
+        };
+
+        if consumed {
+            return;
+        }
+
+        self.parsed_elements.push(ParsedElement::new(
+            self.total_lines,
+            element_parser
+                .element
+                .expect("Expected element_parser.is_ok() to signal valid elements."),
+        ));
+    }
 }
 
 #[cfg(test)]

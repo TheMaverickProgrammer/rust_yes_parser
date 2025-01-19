@@ -19,6 +19,10 @@ impl KeyVal {
         }
     }
 
+    pub fn copy(other: &KeyVal) -> KeyVal {
+        KeyVal::new(other.key.clone(), other.val.clone())
+    }
+
     pub fn is_nameless(&self) -> bool {
         self.key == None
     }
