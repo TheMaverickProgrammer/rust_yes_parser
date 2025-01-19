@@ -41,4 +41,13 @@ mod tests {
         let str: String = hw.to_owned();
         assert_eq!(str.substring(7, 5), "world");
     }
+
+    #[test]
+    fn trim() {
+        let hw = "Hello, world!";
+        let padded_hw = "   Hello, world!    ";
+        let mut str = hw.to_owned();
+        assert_eq!(str.trim(), hw);
+        assert_eq!(padded_hw.trim(), hw);
+    }
 }
