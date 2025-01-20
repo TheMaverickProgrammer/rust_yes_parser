@@ -184,7 +184,7 @@ impl YesDocParser {
 
 #[cfg(test)]
 mod tests {
-    use crate::utils::StringUtils;
+    use crate::{enums::Elements, literal::Literal, utils::StringUtils, YesDocParser};
 
     #[test]
     fn is_quoted() {
@@ -223,5 +223,26 @@ mod tests {
         let mut str = hw.to_owned();
         assert_eq!(str.trim(), hw);
         assert_eq!(padded_hw.trim(), hw);
+    }
+
+    #[test]
+    fn parse_macro_content() {
+        let content = "!macro teardown_textbox(tb) = \"call common.textbox_teardown tb=\"tb";
+        let doc = YesDocParser::from_string(content, Some(vec![Literal::build_quotes()]));
+        assert_eq!(doc.parsed_elements.len(), 1);
+
+        let first = doc.parsed_elements.first();
+        assert_eq!(first.is_some(), true);
+
+        let element = match &first.unwrap().data {
+            Elements::Global(data) => data,
+            _ => panic!("Should not happen!"),
+        };
+
+        assert_eq!(element.args.first().is_some(), true);
+        let arg = element.args.first().unwrap();
+
+        assert_eq!(arg.key.as_ref().unwrap(), "teardown_textbox(tb)");
+        assert_eq!(arg.val, "\"call common.textbox_teardown tb=\"tb");
     }
 }

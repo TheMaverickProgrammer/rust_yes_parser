@@ -217,7 +217,7 @@ impl ElementParser {
         // Populate our table with the provided literals, if any.
         // Initially, they're mapped value will be None.
         match literals {
-            Some(list) => {
+            Some(ref list) => {
                 for literal in list {
                     ud_literals.insert(literal, None);
                 }
