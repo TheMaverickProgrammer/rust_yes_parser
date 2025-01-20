@@ -73,7 +73,7 @@ impl ElementParser {
         self.delimiter = delim;
     }
 
-    pub fn read(line_number: usize, line: &str, literals: Option<Vec<Literal>>) -> ElementParser {
+    pub fn read(line_number: usize, line: &str, literals: &Option<Vec<Literal>>) -> ElementParser {
         // Step 1: Trim whitespace and start at the first valid character
         let line_slice = line.trim().as_bytes();
         let len = line_slice.len();
@@ -95,12 +95,14 @@ impl ElementParser {
         let mut pos = 0;
         while pos < len {
             let token = line_slice[pos];
+
+            // Find first non-space character.
             if token == Glyphs::Space.value() {
                 pos = pos + 1;
                 continue;
             }
 
-            // We are on our first non-reserved token.
+            // We are on our first non-reserved character.
             if !Glyphs::is_reserved(token) {
                 break;
             }
@@ -177,11 +179,11 @@ impl ElementParser {
         });
 
         // Step 4: parse tokens, if any and return results
-        p.parse_tokens(line_slice, end, literals);
+        p.parse_tokens(line_slice, end, &literals);
         p
     }
 
-    fn parse_tokens(&mut self, slice: &[u8], mut start: usize, literals: Option<Vec<Literal>>) {
+    fn parse_tokens(&mut self, slice: &[u8], mut start: usize, literals: &Option<Vec<Literal>>) {
         let len = slice.len();
 
         // Find first non-space character
@@ -199,7 +201,8 @@ impl ElementParser {
             return;
         }
 
-        let walk_info = self.collect_tokens(slice, start, literals);
+        // Collect and then evaluate all KeyVal args
+        let walk_info = self.collect_tokens(slice, start, &literals);
         self.evaluate_keyvals(walk_info);
     }
 
@@ -207,9 +210,20 @@ impl ElementParser {
         &mut self,
         slice: &[u8],
         start: usize,
-        literals: Option<Vec<Literal>>,
+        literals: &Option<Vec<Literal>>,
     ) -> Vec<TokenWalkInfo> {
-        let mut ud_literals = HashMap::<&Literal, usize>::new();
+        let mut ud_literals = HashMap::<&Literal, Option<usize>>::new();
+
+        // Populate our table with the provided literals, if any.
+        // Initially, they're mapped value will be None.
+        match literals {
+            Some(list) => {
+                for literal in list {
+                    ud_literals.insert(literal, None);
+                }
+            }
+            None => (),
+        }
 
         let len = slice.len();
         let mut curr = start;
@@ -297,12 +311,11 @@ impl ElementParser {
                     if literal.begin == c {
                         is_literal = true;
                         active_literal = Some(literal);
-                        let v = match ud_literals.get(literal) {
-                            Some(value) => value,
-                            None => &0,
-                        };
-
-                        ud_literals.insert(*literal, v + 1);
+                        let v = ud_literals
+                            .get(literal)
+                            .unwrap()
+                            .expect("Key returned from map invalid at time of call.");
+                        ud_literals.insert(*literal, Some(v + 1));
 
                         curr += 1;
                         continue_loop = true;
@@ -315,6 +328,7 @@ impl ElementParser {
                 }
             }
 
+            // Ensure literals are terminated before evaluating delimiters.
             if is_literal {
                 // If [is_literal] is true, then [active_literal] should
                 // never be [Option::None].
@@ -324,10 +338,12 @@ impl ElementParser {
                 );
 
                 if let Some(ref key) = active_literal {
-                    let mut value = ud_literals.get_mut(key);
+                    let value = ud_literals
+                        .get_mut(key)
+                        .expect("Key active_literal was invalid.");
 
-                    if value == None {
-                        value.replace(&mut curr);
+                    if *value == None {
+                        value.replace(curr);
                     } else {
                         ud_literals.remove(key);
                         active_literal = None;
@@ -338,6 +354,7 @@ impl ElementParser {
                 }
             }
 
+            // Look ahead for terminating literal
             if let Some(ref key) = active_literal {
                 let maybe_end_pos: Option<usize> =
                     slice.iter().skip(curr).position(|&b| b == key.end);
@@ -345,6 +362,8 @@ impl ElementParser {
                     curr = end_pos;
                     continue;
                 } else {
+                    // This loop will never resolve the delimiter because
+                    // there is a missing terminating literal.
                     break;
                 }
             }
@@ -357,20 +376,31 @@ impl ElementParser {
             curr += 1;
         }
 
+        // Edge case: one KeyVal pair can have spaces around them
+        // while being parsed correctly per the spec.
         let one_token_exists = equal_count == 1
             && tokens_bf_eq == 1
             && tokens_af_eq <= 1
             && spaces_bf_eq.abs_diff(spaces_af_eq) <= 1
             && space != None;
 
+        // EOL with no comma delimiter found.
         if self.delimiter == Delimiters::Unset {
             if one_token_exists {
+                // Edge case #2: no delimiter was found
+                // and only **one** key provided, which means
+                // the KeyVal pair is likely to be surrounded by
+                // whitespace and should be permitted. The Comma
+                // delimiter allows for surrounding whitespace.
                 self.set_delimiter(Delimiters::Comma);
             } else {
+                // No space token found so there is no other delimiter.
+                // Spaces will be used.
                 self.set_delimiter(Delimiters::Space);
             }
         }
 
+        // Step 2: Use learned delimiter to collect the tokens
         curr = start;
         equal = None;
         active_literal = None;
@@ -383,16 +413,20 @@ impl ElementParser {
 
             let mut is_literal = false;
             if let Some(literal) = active_literal {
+                // Test if this is the matching end literal.
                 if literal.end == c {
                     is_literal = true
                 }
             } else {
+                // An equal glyph was found outside a string literal.
+                // Track it to help with token parsing later.
                 if is_equal {
                     equal = Some(curr);
                     curr += 1;
                     continue;
                 }
 
+                // No active literal span indicates this delimiter is valid.
                 if is_delim {
                     if let Ok(str) = String::from_utf8(slice.to_vec()) {
                         tokens.push(TokenWalkInfo {
@@ -405,6 +439,7 @@ impl ElementParser {
                     }
                 }
 
+                // Test all literals to determine if we begin a string span
                 for literal in ud_literals.keys() {
                     if literal.begin == c {
                         is_literal = true;
@@ -422,10 +457,12 @@ impl ElementParser {
                 );
 
                 if let Some(ref key) = active_literal {
-                    let mut value = ud_literals.get_mut(key);
+                    let value = ud_literals
+                        .get_mut(key)
+                        .expect("Key active_literal was invalid.");
 
-                    if value == None {
-                        value.replace(&mut curr);
+                    if *value == None {
+                        value.replace(curr);
                     } else {
                         ud_literals.remove(key);
                         active_literal = None;
@@ -449,6 +486,8 @@ impl ElementParser {
                     curr = end_pos;
                     continue;
                 } else {
+                    // This loop will never resolve the delimiter because
+                    // there is a missing terminating literal.
                     break;
                 }
             }
@@ -472,15 +511,15 @@ impl ElementParser {
 
     fn evaluate_keyvals(&mut self, tokens: Vec<TokenWalkInfo>) {
         for token in tokens {
-            // Edge case: token is just the equal char
-            // Treat this as no key and no value
+            // Edge case: token is just the equal chararacter.
+            // Treat this as no key and no value.
             if let Some(&c) = token.data.as_bytes().first() {
                 if c == Glyphs::Equal.value() {
                     continue;
                 }
             }
 
-            // Named key values are seperated by equal (=) char
+            // Named key values are seperated by equal (=) char.
             if token.has_pivot() {
                 let keyval = KeyVal::new(
                     Some(

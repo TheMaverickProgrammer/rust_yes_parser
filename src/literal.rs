@@ -1,6 +1,6 @@
 use crate::enums::Glyphs;
 
-#[derive(Eq, Hash)]
+#[derive(Eq, Hash, Clone)]
 pub struct Literal {
     pub begin: u8,
     pub end: u8,
@@ -17,6 +17,13 @@ impl Literal {
         }
 
         Ok(Literal { begin, end })
+    }
+
+    pub fn build_quotes() -> Literal {
+        Literal {
+            begin: Glyphs::Quote.value(),
+            end: Glyphs::Quote.value(),
+        }
     }
 }
 

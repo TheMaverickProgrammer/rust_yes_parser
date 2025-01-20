@@ -1,3 +1,8 @@
+use std::{
+    fs::File,
+    io::{BufRead, BufReader},
+};
+
 use element::Element;
 use element_parser::ElementParser;
 use enums::{Elements, ErrorCodes, Glyphs};
@@ -21,6 +26,7 @@ impl ParsedElement {
     }
 }
 
+#[allow(dead_code)]
 pub struct LineError {
     line_number: usize,
     message: String,
@@ -53,22 +59,70 @@ pub struct YesDocParser {
 }
 
 impl YesDocParser {
+    pub fn from_file(file: &File, literals: Option<Vec<Literal>>) -> YesDocParser {
+        let reader = BufReader::new(file);
+
+        let mut parser = YesDocParser {
+            total_lines: 0,
+            building_line: None,
+            attrs: Vec::new(),
+            parsed_elements: Vec::new(),
+            errors: Vec::new(),
+        };
+
+        let mut list = match literals {
+            Some(ref custom) => custom.clone(),
+            None => Vec::new(),
+        };
+
+        list.push(Literal::build_quotes());
+
+        for line in reader.lines() {
+            parser.process(&mut line.unwrap(), &literals);
+        }
+
+        parser.organize();
+
+        parser
+    }
+
     pub fn from_string(body: &str, literals: Option<Vec<Literal>>) -> YesDocParser {
-        todo!()
+        let mut parser = YesDocParser {
+            total_lines: 0,
+            building_line: None,
+            attrs: Vec::new(),
+            parsed_elements: Vec::new(),
+            errors: Vec::new(),
+        };
+
+        let mut list = match literals {
+            Some(ref custom) => custom.clone(),
+            None => Vec::new(),
+        };
+
+        list.push(Literal::build_quotes());
+
+        for line in body.split("\n") {
+            parser.process(&mut String::from(line), &literals);
+        }
+
+        parser.organize();
+
+        parser
     }
 
     fn organize(&mut self) {
         // Hoist globals to the top of the list in order they were entered.
         self.parsed_elements
             .sort_by(|a, b| match (&a.data, &b.data) {
-                (Elements::Global(g1), Elements::Global(g2)) => a.line_number.cmp(&b.line_number),
+                (Elements::Global(_), Elements::Global(_)) => a.line_number.cmp(&b.line_number),
                 (Elements::Global(_), _) => std::cmp::Ordering::Less,
                 (_, Elements::Global(_)) => std::cmp::Ordering::Greater,
                 _ => a.line_number.cmp(&b.line_number),
             });
     }
 
-    fn process(&mut self, line: &mut String, literals: Option<Vec<Literal>>) {
+    fn process(&mut self, line: &mut String, literals: &Option<Vec<Literal>>) {
         self.total_lines += 1;
 
         let backslash = Glyphs::Backslash.value() as char;
@@ -87,7 +141,7 @@ impl YesDocParser {
             self.building_line = None;
         }
 
-        let mut element_parser = ElementParser::read(self.total_lines, line, literals);
+        let mut element_parser = ElementParser::read(self.total_lines, line, &literals);
 
         if !element_parser.is_ok() {
             self.errors.push(LineError::from_error_code(

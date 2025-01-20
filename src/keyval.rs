@@ -1,6 +1,6 @@
 use std::fmt;
 
-use crate::utils::StringUtils;
+use crate::{enums::Glyphs, utils::StringUtils};
 
 pub struct KeyVal {
     pub key: Option<String>,
@@ -12,10 +12,13 @@ pub struct KeyVal {
 impl KeyVal {
     pub fn new(key: Option<String>, val: String) -> KeyVal {
         KeyVal {
+            key_contains_space: match key {
+                None => false,
+                Some(ref k) => k.find(|x| x == Glyphs::Space.value() as char).is_some(),
+            },
+            value_contains_space: val.find(|x| x == Glyphs::Space.value() as char).is_some(),
             key,
             val,
-            key_contains_space: true,
-            value_contains_space: true,
         }
     }
 
