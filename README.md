@@ -20,7 +20,18 @@ This API provides two methods:
 
 
 ```rs
-todo
+  let content = "frame duration = 1.0s , width = 10, height=20";
+  let doc = YesDocParser::from_string(content);
+  assert_eq!(doc.results.len(), 1);
+
+  // Prints what was parsed, formatted.
+  for result in &doc.results {
+    if result.has_error() {
+
+    } else {
+      println!("{}", element);
+    }
+  }
 ```
 
 ### Run the Example

@@ -1,3 +1,18 @@
+//! Your Extensible Script Parser
+//!
+//! Provides `YesDocParser` to parse YES documents from file or from strings.
+//! The entry-points are:
+//! - `YesDocParser::from_file(&File, Option<Vec<Literal>>) -> YesDocParser`
+//! - `YesDocParser::from_string(&str, Option<Vec<Literal>>) -> YesDocParser`
+//!
+//! Both take an optional list of `Literal` structs which denote custom
+//! `begin` and `end` tokens. Both entry-points will append the result from
+//! `List::build_quotes()` regardless if any custom literals are also provided.
+//!
+//! Literals instruct the parser which span of characters, called a token,
+//! will be considered when finding the next key-value pair. This implies,
+//! by default, that quoted strings can be parsed correctly so that they can
+//! be key or a value even if they contain reserved symbols.
 use std::{
     fs::File,
     io::{BufRead, BufReader},
@@ -15,67 +30,76 @@ pub mod keyval;
 pub mod literal;
 pub mod utils;
 
-pub struct ParsedElement {
-    line_number: usize,
-    data: Elements,
+pub enum ParseResult {
+    Ok {
+        line_number: usize,
+        data: Elements,
+    },
+    Err {
+        line_number: usize,
+        message: String,
+        code: ErrorCodes,
+    },
 }
 
-impl ParsedElement {
-    pub fn new(line_number: usize, data: Elements) -> ParsedElement {
-        ParsedElement { line_number, data }
-    }
-}
-
-#[allow(dead_code)]
-pub struct LineError {
-    line_number: usize,
-    message: String,
-    code: ErrorCodes,
-}
-
-impl LineError {
-    pub fn from_error_code(line_number: usize, code: ErrorCodes) -> LineError {
-        LineError {
+impl ParseResult {
+    /// Constructs and returns [ParserResult::Err] with a line number
+    /// and spec-associated [ErrorCodes] serialized as a string into
+    /// the field [ParserResult::Err::message].
+    pub fn error(line_number: usize, code: ErrorCodes) -> ParseResult {
+        ParseResult::Err {
             line_number,
             message: code.values().to_owned(),
             code,
         }
     }
 
-    pub fn custom(line_number: usize, message: String) -> LineError {
-        LineError {
+    /// Constructs and returns [ParserResult::Err] with a line number
+    /// and a custom message. [ParserResult::Err::code] will be
+    /// set to [ErrorCodes::Runtime]. This construction should be used
+    /// for specialized error messages when using YES format for custom
+    /// purposes.
+    pub fn custom_error(line_number: usize, message: String) -> ParseResult {
+        ParseResult::Err {
             line_number,
             message,
             code: ErrorCodes::Runtime,
         }
     }
 }
+
+/// The entry-point for parsing YES documents and scriplets.
+/// It is responsible for tracking the total number of lines fed,
+/// the line being built (in the event of multi-lines),
+/// the attributes for the next standard element, and collecting
+/// the results of the [ElementParser::read] routine.
 pub struct YesDocParser {
-    pub total_lines: usize,
+    total_lines: usize,
     building_line: Option<String>,
     attrs: Vec<Element>,
-    pub parsed_elements: Vec<ParsedElement>,
-    pub errors: Vec<LineError>,
+    results: Vec<ParseResult>,
 }
 
 impl YesDocParser {
-    pub fn from_file(file: &File, literals: Option<Vec<Literal>>) -> YesDocParser {
+    /// Returns a list of [ParserResult] values read from an input [file].
+    pub fn from_file(file: &File, literals: Option<Vec<Literal>>) -> Vec<ParseResult> {
         let reader = BufReader::new(file);
 
         let mut parser = YesDocParser {
             total_lines: 0,
             building_line: None,
             attrs: Vec::new(),
-            parsed_elements: Vec::new(),
-            errors: Vec::new(),
+            results: Vec::new(),
         };
 
-        let mut list = match literals {
+        let mut literals = match literals {
             Some(ref custom) => custom.clone(),
             None => Vec::new(),
         };
 
-        list.push(Literal::build_quotes());
+        literals.insert(0, Literal::build_quotes());
+
+        let literals = Some(literals);
 
         for line in reader.lines() {
             parser.process(&mut line.unwrap(), &literals);
@@ -83,24 +107,26 @@ impl YesDocParser {
 
         parser.organize();
 
-        parser
+        parser.results
     }
 
-    pub fn from_string(body: &str, literals: Option<Vec<Literal>>) -> YesDocParser {
+    /// Returns a list of [ParserResult] values read from [body].
+    pub fn from_string(body: &str, literals: Option<Vec<Literal>>) -> Vec<ParseResult> {
         let mut parser = YesDocParser {
             total_lines: 0,
             building_line: None,
             attrs: Vec::new(),
-            parsed_elements: Vec::new(),
-            errors: Vec::new(),
+            results: Vec::new(),
         };
 
-        let mut list = match literals {
+        let mut literals = match literals {
             Some(ref custom) => custom.clone(),
             None => Vec::new(),
         };
 
-        list.push(Literal::build_quotes());
+        literals.insert(0, Literal::build_quotes());
+
+        let literals = Some(literals);
 
         for line in body.split("\n") {
             parser.process(&mut String::from(line), &literals);
@@ -108,20 +134,31 @@ impl YesDocParser {
 
         parser.organize();
 
-        parser
+        parser.results
     }
 
+    /// Hoist globals to the top of the list in order they were entered.
+    /// This makes it easier to use the results when all [Elements::Global]
+    /// elements are at the front of the vector and can be applied before
+    /// other elements are read by the end-user.
     fn organize(&mut self) {
-        // Hoist globals to the top of the list in order they were entered.
-        self.parsed_elements
-            .sort_by(|a, b| match (&a.data, &b.data) {
-                (Elements::Global(_), Elements::Global(_)) => a.line_number.cmp(&b.line_number),
-                (Elements::Global(_), _) => std::cmp::Ordering::Less,
-                (_, Elements::Global(_)) => std::cmp::Ordering::Greater,
-                _ => a.line_number.cmp(&b.line_number),
-            });
+        self.results.sort_by(|a, b| {
+            let a = match a {
+                ParseResult::Ok { line_number, .. } => line_number,
+                ParseResult::Err { line_number, .. } => line_number,
+            };
+
+            let b = match b {
+                ParseResult::Ok { line_number, .. } => line_number,
+                ParseResult::Err { line_number, .. } => line_number,
+            };
+
+            a.cmp(b)
+        });
     }
 
+    /// Builds a new string, [Self::building_line], from the input [line].
+    /// This accounts for the [Glyphs::Backslash] character in the spec.
     fn process(&mut self, line: &mut String, literals: &Option<Vec<Literal>>) {
         self.total_lines += 1;
 
@@ -145,7 +182,7 @@ impl YesDocParser {
         let mut element_parser = ElementParser::read(self.total_lines, line, &literals);
 
         if !element_parser.is_ok() {
-            self.errors.push(LineError::from_error_code(
+            self.results.push(ParseResult::error(
                 element_parser.line_number,
                 element_parser.error.unwrap(),
             ));
@@ -158,7 +195,7 @@ impl YesDocParser {
             }
             Some(Elements::Standard {
                 ref mut attrs,
-                data: _,
+                element: _,
             }) => {
                 for a in &self.attrs {
                     attrs.push(Elements::copy(a));
@@ -174,69 +211,34 @@ impl YesDocParser {
             return;
         }
 
-        self.parsed_elements.push(ParsedElement::new(
-            self.total_lines,
-            element_parser
+        self.results.push(ParseResult::Ok {
+            line_number: self.total_lines,
+            data: element_parser
                 .element
                 .expect("Expected element_parser.is_ok() to signal valid elements."),
-        ));
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{enums::Elements, literal::Literal, utils::StringUtils, YesDocParser};
-
-    #[test]
-    fn is_quoted() {
-        let hwq = "\"Hello, world!\"";
-        let str: String = hwq.to_owned();
-        assert_eq!(str.is_quoted(), true);
-    }
-
-    #[test]
-    fn quote_string() {
-        let hw = "Hello, world!";
-        let hwq = "\"Hello, world!\"";
-        let mut str: String = hw.to_owned();
-        assert_eq!(str.quote(), hwq);
-    }
-
-    #[test]
-    fn unquote_string() {
-        let hw = "Hello, world!";
-        let mut str: String = hw.to_owned();
-        str.quote();
-        assert_eq!(str.unquote(), hw);
-    }
-
-    #[test]
-    fn substring() {
-        let hw = "Hello, world!";
-        let str: String = hw.to_owned();
-        assert_eq!(str.substring(7, 5), "world");
-    }
-
-    #[test]
-    fn trim() {
-        let hw = "Hello, world!";
-        let mut padded_hw = "   Hello, world!    ".to_owned();
-        let mut str = hw.to_owned();
-        assert_eq!(str.trim(), hw);
-        assert_eq!(padded_hw.trim(), hw);
-    }
+    use crate::{enums::Elements, literal::Literal, ParseResult, YesDocParser};
 
     #[test]
     fn parse_macro_content() {
         let content = "!macro teardown_textbox(tb) = \"call common.textbox_teardown tb=\"tb";
-        let doc = YesDocParser::from_string(content, Some(vec![Literal::build_quotes()]));
-        assert_eq!(doc.parsed_elements.len(), 1);
+        let results: Vec<ParseResult> =
+            YesDocParser::from_string(content, Some(vec![Literal::build_quotes()]));
+        assert_eq!(results.len(), 1);
 
-        let first = doc.parsed_elements.first();
+        let first = results.first();
         assert_eq!(first.is_some(), true);
 
-        let element = match &first.unwrap().data {
-            Elements::Global(data) => data,
+        let element = match &first.unwrap() {
+            ParseResult::Ok {
+                line_number: _,
+                data: Elements::Global(element),
+            } => element,
             _ => panic!("Global expected!"),
         };
         assert_eq!(element.text, "macro");
@@ -256,25 +258,26 @@ mod tests {
             var list2: [int]=[1\\\n\
             , 2, 3, 4, 5, 6, 7]";
 
-        let doc = YesDocParser::from_string(
+        let results = YesDocParser::from_string(
             content,
-            Some(vec![
-                Literal::build_quotes(),
-                Literal {
-                    begin: '[' as u8,
-                    end: ']' as u8,
-                },
-            ]),
+            Some(vec![Literal {
+                begin: '[' as u8,
+                end: ']' as u8,
+            }]),
         );
-        assert_eq!(doc.parsed_elements.len(), 2);
+        assert_eq!(results.len(), 2);
 
-        let first = doc.parsed_elements.first();
+        let first = results.first();
         assert_eq!(first.is_some(), true);
 
-        let element = match &first.unwrap().data {
-            Elements::Standard { attrs: _, data } => data,
-            _ => panic!("Standard expected!"),
+        let element = match &first.unwrap() {
+            ParseResult::Ok {
+                line_number: _,
+                data: Elements::Standard { attrs: _, element },
+            } => element,
+            _ => panic!("Standard element expected!"),
         };
+
         assert_eq!(element.text, "var");
         assert_eq!(element.args.len(), 2);
 
@@ -287,13 +290,17 @@ mod tests {
         assert_eq!(arg2.key.as_ref().unwrap(), "str");
         assert_eq!(arg2.val.len(), 108);
 
-        let second = doc.parsed_elements.iter().nth(1);
+        let second = results.iter().nth(1);
         assert_eq!(second.is_some(), true);
 
-        let element = match &second.unwrap().data {
-            Elements::Standard { attrs: _, data } => data,
-            _ => panic!("Standard expected!"),
+        let element = match &second.unwrap() {
+            ParseResult::Ok {
+                line_number: _,
+                data: Elements::Standard { attrs: _, element },
+            } => element,
+            _ => panic!("Standard element expected!"),
         };
+
         assert_eq!(element.text, "var");
         assert_eq!(element.args.len(), 2);
 
@@ -310,15 +317,18 @@ mod tests {
     #[test]
     fn delimiter_test1() {
         let content = "x a=b -c";
-        let doc = YesDocParser::from_string(content, Some(vec![Literal::build_quotes()]));
-        assert_eq!(doc.parsed_elements.len(), 1);
+        let results = YesDocParser::from_string(content, None);
+        assert_eq!(results.len(), 1);
 
-        let first = doc.parsed_elements.first();
+        let first = results.first();
         assert_eq!(first.is_some(), true);
 
-        let element = match &first.unwrap().data {
-            Elements::Standard { attrs: _, data } => data,
-            _ => panic!("Standard expected!"),
+        let element = match &first.unwrap() {
+            ParseResult::Ok {
+                line_number: _,
+                data: Elements::Standard { attrs: _, element },
+            } => element,
+            _ => panic!("Standard element expected!"),
         };
 
         assert_eq!(element.text, "x");
@@ -332,5 +342,44 @@ mod tests {
         let arg2 = element.args.iter().nth(1).unwrap();
         assert_eq!(arg2.key.is_none(), true);
         assert_eq!(arg2.val, "-c");
+    }
+
+    #[test]
+    fn comma_delimiter_test() {
+        let content = "frame duration = 1.0s , width = 10, height=20";
+        let results = YesDocParser::from_string(content, None);
+        assert_eq!(results.len(), 1);
+
+        for result in &results {
+            match result {
+                ParseResult::Ok { line_number, data } => println!("#{}: {}", line_number, data),
+                ParseResult::Err {
+                    line_number,
+                    message,
+                    ..
+                } => println!("There was an error on line #{}: {}!", line_number, message),
+            }
+        }
+
+        let data = if let Some(ref result) = results.first() {
+            match result {
+                ParseResult::Ok {
+                    line_number: _,
+                    data: Elements::Standard { attrs: _, element },
+                } => element,
+                _ => panic!("Standard element expected!"),
+            }
+        } else {
+            panic!("Expected this iterator to have Some() for parsed_elements!");
+        };
+
+        assert_eq!(data.text, "frame");
+
+        let args = &data.args;
+        assert_eq!(args.len(), 3);
+
+        for arg in args {
+            println!("{}", arg);
+        }
     }
 }

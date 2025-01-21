@@ -25,6 +25,7 @@ struct TokenWalkInfo {
 }
 
 impl TokenWalkInfo {
+    /// Short-hand to test if [Self::pivot] is [Some].
     pub fn has_pivot(&self) -> bool {
         if let Some(_) = self.pivot {
             return true;
@@ -33,6 +34,12 @@ impl TokenWalkInfo {
         false
     }
 
+    /// Because [a] can be [None], it may not be possible to subtract
+    /// start from end during parsing. Instead, check if [a] is [Some].
+    /// Then, if it is, check if `x < b`. If it is not, return [None] as it
+    /// cannot be subtracted. Once all of these constraints are satisfied,
+    /// then the result value will be [Some] whose value is `x - b`. This
+    /// value is used as the pivot-point while parsing.
     fn calc_pivot(a: Option<usize>, b: usize) -> Option<usize> {
         if let Some(x) = a {
             if x < b {
@@ -46,6 +53,9 @@ impl TokenWalkInfo {
     }
 }
 
+/// This struct is responsible for evaluating the [Delimiters] in each line,
+/// parsing the [KeyVal]s, building the [Elements] variant or providing the
+/// [ErrorCodes] if an element could not be built.
 pub struct ElementParser {
     delimiter: Delimiters,
     pub element: Option<Elements>,
@@ -54,6 +64,7 @@ pub struct ElementParser {
 }
 
 impl ElementParser {
+    /// Short-hand to query [Self::error] is [None].
     pub fn is_ok(&self) -> bool {
         match self.error {
             None => true,
@@ -61,10 +72,13 @@ impl ElementParser {
         }
     }
 
+    /// Sets [Self::error] to some [ErrorCodes] value.
     fn set_error(&mut self, error: ErrorCodes) {
         self.error = Some(error);
     }
 
+    /// Sets [Self::delimiter] to some [Delimiters] value if and only if the
+    /// delimiter is equal to [Delimiters::Unset]. Otherwise, this is a no-op.
     fn set_delimiter(&mut self, delim: Delimiters) {
         if self.delimiter != Delimiters::Unset {
             return;
@@ -73,6 +87,17 @@ impl ElementParser {
         self.delimiter = delim;
     }
 
+    /// This is the entry-point for the entire element parsing algorithm broken
+    /// down into the following steps:
+    ///     - Parsing the element type and name.
+    ///     - Parsing the remaining tokens via [Self::parse_tokens].
+    ///         - Which must first call [Self::collect_tokens].
+    ///         - And then evaluating the tokens [Self::evaluate_keyvals].
+    ///
+    /// The process must ensure custom [Literal]s are respected and that the
+    /// order of delimiter characters are evaluated correctly to best parse the
+    /// remaining [KeyVal]s. The judgement for the delimiter uses a heuristic
+    /// which looks for [Glyphs::Equal] outside of string literal spans.
     pub fn read(line_number: usize, line: &str, literals: &Option<Vec<Literal>>) -> ElementParser {
         // Step 1: Trim whitespace and start at the first valid character
         let slice = line.trim().as_bytes();
@@ -537,15 +562,4 @@ impl ElementParser {
             self.element.as_mut().unwrap().upsert_keyval(keyval);
         }
     }
-}
-
-pub enum ParseResult {
-    Success {
-        line: usize,
-    },
-    Fail {
-        line: usize,
-        message: String,
-        code: ErrorCodes,
-    },
 }
