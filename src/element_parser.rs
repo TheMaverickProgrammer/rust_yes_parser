@@ -75,8 +75,8 @@ impl ElementParser {
 
     pub fn read(line_number: usize, line: &str, literals: &Option<Vec<Literal>>) -> ElementParser {
         // Step 1: Trim whitespace and start at the first valid character
-        let line_slice = line.trim().as_bytes();
-        let len = line_slice.len();
+        let slice = line.trim().as_bytes();
+        let len = slice.len();
 
         let mut p = ElementParser {
             delimiter: Delimiters::Unset,
@@ -94,22 +94,22 @@ impl ElementParser {
 
         let mut pos = 0;
         while pos < len {
-            let token = line_slice[pos];
+            let c = slice[pos];
 
             // Find first non-space character.
-            if token == Glyphs::Space.value() {
-                pos = pos + 1;
+            if c == Glyphs::Space.value() {
+                pos += 1;
                 continue;
             }
 
             // We are on our first non-reserved character.
-            if !Glyphs::is_reserved(token) {
+            if !Glyphs::is_reserved(c) {
                 break;
             }
 
             // Step 2: if the first valid character is reserved prefix
             // then tag the element and continue searching for the name start pos
-            match Glyphs::from(token) {
+            match Glyphs::from(c) {
                 Glyphs::At => {
                     if element_type != ElementTypes::Standard {
                         p.set_error(ErrorCodes::BadTokenPosAttribute);
@@ -117,7 +117,7 @@ impl ElementParser {
                     }
 
                     element_type = ElementTypes::Attribute;
-                    pos = pos + 1;
+                    pos += 1;
                     continue;
                 }
                 Glyphs::Bang => {
@@ -127,14 +127,13 @@ impl ElementParser {
                     }
 
                     element_type = ElementTypes::Global;
-                    pos = pos + 1;
+                    pos += 1;
                     continue;
                 }
-
                 Glyphs::Hash => {
                     if element_type == ElementTypes::Standard {
-                        if let Ok(str) = String::from_utf8(line_slice.to_owned()) {
-                            p.element = Some(Elements::new_comment(str.substring(pos, len)));
+                        if let Ok(str) = String::from_utf8(slice.to_owned()) {
+                            p.element = Some(Elements::new_comment(str.substring(pos + 1, len)));
                             return p;
                         }
                     }
@@ -144,21 +143,15 @@ impl ElementParser {
         }
 
         // Step 3: find end of element name (first space or EOL)
-        let end = match line_slice.iter().position(|&b| b == Glyphs::Space.value()) {
+        let end = match slice.iter().position(|&b| b == Glyphs::Space.value()) {
             None => len,
             Some(idx) => min(len, idx),
         };
 
         let name: String;
-
-        if let Ok(str) = String::from_utf8(line_slice.to_owned()) {
-            name = str.substring(pos, end).unquote().clone();
+        if let Ok(str) = String::from_utf8(slice.to_owned()) {
+            name = str.substring(pos, end - pos).unquote().clone();
         } else {
-            p.set_error(ErrorCodes::Runtime);
-            return p;
-        }
-
-        if name.is_empty() {
             p.set_error(match p.element {
                 Some(ref el) => match el {
                     Elements::Attribute(_) => ErrorCodes::EolMissingAttribute,
@@ -179,7 +172,7 @@ impl ElementParser {
         });
 
         // Step 4: parse tokens, if any and return results
-        p.parse_tokens(line_slice, end, &literals);
+        p.parse_tokens(slice, end, &literals);
         p
     }
 
@@ -189,7 +182,7 @@ impl ElementParser {
         // Find first non-space character
         while start < len {
             if slice[start] == Glyphs::Space.value() {
-                start = start + 1;
+                start += 1;
                 continue;
             }
 
@@ -267,6 +260,8 @@ impl ElementParser {
                 }
             } else {
                 if !is_space && !is_equal {
+                    // The leading equals char determines how the rest of the document
+                    // will be parsed when no comma delimiter is set.
                     if !token_walking {
                         if equal == None {
                             tokens_bf_eq += 1;
@@ -277,6 +272,7 @@ impl ElementParser {
 
                     token_walking = true;
 
+                    // Clear the spaces metrics.
                     if equal == None {
                         spaces_bf_eq = 0;
                     } else {
@@ -284,16 +280,17 @@ impl ElementParser {
                     }
                 } else if is_space {
                     if token_walking {
+                        // Count spaces before and after equals character.
                         if equal == None {
-                            spaces_af_eq += 1;
+                            spaces_bf_eq += 1;
                         } else {
                             spaces_af_eq += 1;
                         }
-                        token_walking = false;
+                    }
+                    token_walking = false;
 
-                        if space == None {
-                            space = Some(curr);
-                        }
+                    if space == None {
+                        space = Some(curr);
                     }
                 } else if is_equal {
                     token_walking = false;
@@ -311,11 +308,7 @@ impl ElementParser {
                     if literal.begin == c {
                         is_literal = true;
                         active_literal = Some(literal);
-                        let v = ud_literals
-                            .get(literal)
-                            .unwrap()
-                            .expect("Key returned from map invalid at time of call.");
-                        ud_literals.insert(*literal, Some(v + 1));
+                        ud_literals.insert(*literal, Some(curr));
 
                         curr += 1;
                         continue_loop = true;
@@ -340,26 +333,27 @@ impl ElementParser {
                 if let Some(ref key) = active_literal {
                     let value = ud_literals
                         .get_mut(key)
-                        .expect("Key active_literal was invalid.");
+                        .expect("Expected key for active_literal to be valid.");
 
+                    // Effectively, these next two conditional branches toggle
+                    // whether or not we are reading a literal span.
                     if *value == None {
                         value.replace(curr);
                     } else {
-                        ud_literals.remove(key);
+                        value.take();
                         active_literal = None;
                     }
-
-                    curr += 1;
-                    continue;
                 }
+
+                curr += 1;
+                continue;
             }
 
             // Look ahead for terminating literal
             if let Some(ref key) = active_literal {
-                let maybe_end_pos: Option<usize> =
-                    slice.iter().skip(curr).position(|&b| b == key.end);
-                if let Some(end_pos) = maybe_end_pos {
-                    curr = end_pos;
+                let offset: Option<usize> = slice.iter().skip(curr).position(|&b| b == key.end);
+                if let Some(pos) = offset {
+                    curr += pos;
                     continue;
                 } else {
                     // This loop will never resolve the delimiter because
@@ -412,7 +406,7 @@ impl ElementParser {
             let is_delim = self.delimiter.value() == c;
 
             let mut is_literal = false;
-            if let Some(literal) = active_literal {
+            if let Some(ref literal) = active_literal {
                 // Test if this is the matching end literal.
                 if literal.end == c {
                     is_literal = true
@@ -428,15 +422,16 @@ impl ElementParser {
 
                 // No active literal span indicates this delimiter is valid.
                 if is_delim {
-                    if let Ok(str) = String::from_utf8(slice.to_vec()) {
+                    if let Ok(ref str) = String::from_utf8(slice.to_vec()) {
                         tokens.push(TokenWalkInfo {
-                            data: str.substring(last_token_idx, curr),
+                            data: str.substring(last_token_idx, curr - last_token_idx),
                             pivot: TokenWalkInfo::calc_pivot(equal, last_token_idx),
                         });
-                        curr += 1;
-                        last_token_idx = curr;
-                        continue;
                     }
+
+                    curr += 1;
+                    last_token_idx = curr;
+                    continue;
                 }
 
                 // Test all literals to determine if we begin a string span
@@ -459,31 +454,25 @@ impl ElementParser {
                 if let Some(ref key) = active_literal {
                     let value = ud_literals
                         .get_mut(key)
-                        .expect("Key active_literal was invalid.");
+                        .expect("Expected key for active_literal to be valid.");
 
                     if *value == None {
                         value.replace(curr);
                     } else {
-                        ud_literals.remove(key);
+                        value.take();
                         active_literal = None;
                     }
-
-                    curr += 1;
-                    continue;
                 }
+
+                curr += 1;
+                continue;
             }
 
             // Look ahead for terminating literal
-            assert!(
-                active_literal != None,
-                "Expected active_literal to be Some() while parsing a literal character!"
-            );
-
             if let Some(ref key) = active_literal {
-                let maybe_end_pos: Option<usize> =
-                    slice.iter().skip(curr).position(|&b| b == key.end);
-                if let Some(end_pos) = maybe_end_pos {
-                    curr = end_pos;
+                let offset: Option<usize> = slice.iter().skip(curr).position(|&b| b == key.end);
+                if let Some(pos) = offset {
+                    curr += pos;
                     continue;
                 } else {
                     // This loop will never resolve the delimiter because
@@ -498,9 +487,9 @@ impl ElementParser {
 
         // There was a pending token remaining that was not terminated.
         if last_token_idx < len {
-            if let Ok(str) = String::from_utf8(slice.to_vec()) {
+            if let Ok(ref str) = String::from_utf8(slice.to_vec()) {
                 tokens.push(TokenWalkInfo {
-                    data: str.substring(last_token_idx, len),
+                    data: str.substring(last_token_idx, len - last_token_idx),
                     pivot: TokenWalkInfo::calc_pivot(equal, last_token_idx),
                 });
             }
@@ -519,6 +508,7 @@ impl ElementParser {
                 }
             }
 
+            let len = token.data.len();
             // Named key values are seperated by equal (=) char.
             if token.has_pivot() {
                 let keyval = KeyVal::new(
@@ -532,14 +522,14 @@ impl ElementParser {
                     ),
                     token
                         .data
-                        .substring(token.pivot.unwrap() + 1, token.data.len())
+                        .substring(token.pivot.unwrap() + 1, len - token.pivot.unwrap())
                         .trim()
                         .unquote()
                         .clone(),
                 );
 
                 self.element.as_mut().unwrap().upsert_keyval(keyval);
-                return;
+                continue;
             }
 
             // Upsert the nameless key value
