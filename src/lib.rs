@@ -14,6 +14,7 @@
 //! by default, that quoted strings can be parsed correctly so that they can
 //! be key or a value even if they contain reserved symbols.
 use std::{
+    cmp::Ordering,
     fs::File,
     io::{BufRead, BufReader},
 };
@@ -139,21 +140,37 @@ impl YesDocParser {
 
     /// Hoist globals to the top of the list in order they were entered.
     /// This makes it easier to use the results when all [Elements::Global]
-    /// elements are at the front of the vector and can be applied before
+    /// elements are at the front of the result set and can be applied before
     /// other elements are read by the end-user.
     fn organize(&mut self) {
         self.results.sort_by(|a, b| {
-            let a = match a {
-                ParseResult::Ok { line_number, .. } => line_number,
-                ParseResult::Err { line_number, .. } => line_number,
+            let (a, a_is_global) = match a {
+                ParseResult::Ok { line_number, data } => (
+                    line_number,
+                    match data {
+                        Elements::Global(_) => true,
+                        _ => false,
+                    },
+                ),
+                ParseResult::Err { line_number, .. } => (line_number, false),
             };
 
-            let b = match b {
-                ParseResult::Ok { line_number, .. } => line_number,
-                ParseResult::Err { line_number, .. } => line_number,
+            let (b, b_is_global) = match b {
+                ParseResult::Ok { line_number, data } => (
+                    line_number,
+                    match data {
+                        Elements::Global(_) => true,
+                        _ => false,
+                    },
+                ),
+                ParseResult::Err { line_number, .. } => (line_number, false),
             };
 
-            a.cmp(b)
+            match (a_is_global, b_is_global) {
+                (true, false) => Ordering::Less,
+                (false, true) => Ordering::Greater,
+                _ => a.cmp(b),
+            }
         });
     }
 
