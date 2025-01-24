@@ -394,9 +394,5 @@ mod tests {
 
         let args = &data.args;
         assert_eq!(args.len(), 3);
-
-        for arg in args {
-            println!("{}", arg);
-        }
     }
 }

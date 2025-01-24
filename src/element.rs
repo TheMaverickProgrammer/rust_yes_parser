@@ -31,7 +31,7 @@ impl Element {
             return;
         }
 
-        if let Some(prev) = self.args.iter().position(|kv| match &kv.key {
+        if let Some(prev) = self.args.iter().position(|arg| match &arg.key {
             None => false,
             Some(k) => k == kv.key.as_ref().unwrap(),
         }) {
@@ -48,7 +48,7 @@ impl Element {
     /// an identical [KeyVal::key] field as the input [key].
     /// Nameless keyvals will never match and always return false.
     pub fn has_key(&self, key: &String) -> bool {
-        if let Some(_) = self.args.iter().position(|kv| match &kv.key {
+        if let Some(_) = self.args.iter().position(|arg| match &arg.key {
             None => false,
             Some(k) => k == key,
         }) {
