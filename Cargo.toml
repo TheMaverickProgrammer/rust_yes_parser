@@ -1,7 +1,15 @@
 [package]
 name = "yes_parser"
-version = "0.1.0"
+authors = ["TheMaverickProgrammer"]
+version = "1.0.0"
 edition = "2021"
+license-file = "LICENSE"
+description = "Your Extensible Script standard parser reads so you can write!"
+homepage = "https://github.com/TheMaverickProgrammer/rust_yes_parser"
+repository = "https://github.com/TheMaverickProgrammer/rust_yes_parser"
+readme = "README.md"
+keywords = ["parser", "simple", "script", "reader", "customize"]
+categories = ["config", "game-development", "parsing"]
 
 [[example]]
 name = "config"
