@@ -47,7 +47,7 @@ impl Element {
     /// Returns true if there is a [KeyVal] in [Element::args] which has
     /// an identical [KeyVal::key] field as the input [key].
     /// Nameless keyvals will never match and always return false.
-    pub fn has_key(&self, key: &String) -> bool {
+    pub fn has_key(&self, key: &str) -> bool {
         if let Some(_) = self.args.iter().position(|arg| match &arg.key {
             None => false,
             Some(k) => k == key,
@@ -61,7 +61,7 @@ impl Element {
     /// Tests every key [String] in [keys] with [Element::has_key].
     /// If and only if they are all found, then this returns true.
     /// If any key fails, then this returns false.
-    pub fn has_keys(&self, keys: &Vec<String>) -> bool {
+    pub fn has_keys(&self, keys: &Vec<&str>) -> bool {
         for iter in keys.into_iter() {
             if !self.has_key(iter) {
                 return false;
@@ -76,7 +76,7 @@ impl Element {
     ///
     /// If no such key is found, or the value could not be coerced into [T],
     /// then [None] is returned.
-    pub fn get_key_value<T>(&self, key: &String) -> Option<T>
+    pub fn get_key_value<T>(&self, key: &str) -> Option<T>
     where
         T: FromStr,
     {
@@ -96,7 +96,7 @@ impl Element {
     /// A variation of [Element::get_key_value] which accepts an explicit [or]
     /// input value of type [T]. If the former method would return [None], then
     /// this method returns [or].
-    pub fn get_key_value_or<T>(&self, key: &String, or: T) -> T
+    pub fn get_key_value_or<T>(&self, key: &str, or: T) -> T
     where
         T: FromStr,
     {

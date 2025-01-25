@@ -2,8 +2,8 @@
 //!
 //! Provides `YesDocParser` to parse YES documents from file or from strings.
 //! The entry-points are:
-//! - `YesDocParser::from_file(&File, Option<Vec<Literal>>) -> YesDocParser`
-//! - `YesDocParser::from_string(&str, Option<Vec<Literal>>) -> YesDocParser`
+//! - `YesDocParser::from_file
+//! - `YesDocParser::from_string
 //!
 //! Both take an optional list of `Literal` structs which denote custom
 //! `begin` and `end` tokens. Both entry-points will append the result from
@@ -31,6 +31,7 @@ pub mod keyval;
 pub mod literal;
 pub mod utils;
 
+/// Custom [Result] enum with both variants having a field `line_number`.
 pub enum ParseResult {
     Ok {
         line_number: usize,
@@ -388,12 +389,20 @@ mod tests {
                 _ => panic!("Standard element expected!"),
             }
         } else {
-            panic!("Expected this iterator to have Some() for parsed_elements!");
+            panic!("Expected first iterator to have Some()");
         };
 
         assert_eq!(data.text, "frame");
 
         let args = &data.args;
         assert_eq!(args.len(), 3);
+
+        let duration = data.get_key_value_or("duration", "0s".to_owned());
+        let width = data.get_key_value_or("width", 0);
+        let height = data.get_key_value_or("height", 0);
+
+        assert_eq!(duration, "1.0s");
+        assert_eq!(width, 10);
+        assert_eq!(height, 20);
     }
 }
