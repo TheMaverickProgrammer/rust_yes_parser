@@ -54,7 +54,7 @@ to easily determine if that value is correctly notated as an integer array.
 Here's how to provide a list of custom literals:
 
 ```rs
-let literals = vec![Literal {begin: '[' as u8, end: ']' as u8,}]
+let literals = vec![Literal {begin: '[' as u8, end: ']' as u8,}];
 let results = YesDocParser::from_string(content, Some(literals));
 
 for result in result {

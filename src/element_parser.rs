@@ -350,7 +350,7 @@ impl ElementParser {
             if is_literal {
                 // If [is_literal] is true, then [active_literal] should
                 // never be [Option::None].
-                assert!(
+                debug_assert!(
                     active_literal != None,
                     "Expected active_literal to be Some() while parsing a literal character!"
                 );
@@ -471,7 +471,7 @@ impl ElementParser {
 
             // Ensure literals are terminated before evaluating delimiters.
             if is_literal {
-                assert!(
+                debug_assert!(
                     active_literal != None,
                     "Expected active_literal to be Some() while parsing a literal character!"
                 );

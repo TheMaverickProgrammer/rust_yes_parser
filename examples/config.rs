@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt};
 
 use yes_parser::{
     element::Element,
@@ -7,6 +7,66 @@ use yes_parser::{
 };
 
 extern crate yes_parser;
+
+fn main() {
+    let doc = "!version 1.0.2
+        window width=320 height=240 fullscreen
+        volume sfx=100 music=50
+        lang en
+
+        @default
+        controls left_handed
+            key A 13
+            key Z 1
+            key X 54
+            # etc...
+
+        controls standard
+            invert_y
+            key SPACE 100
+            key RIGHT 101
+            key LEFT 213
+            # etc...";
+
+    let result = ConfigBuilder::from_string(doc);
+
+    match &result {
+        Err(e) => println!("{}", e),
+        _ => (),
+    }
+
+    assert!(result.is_ok());
+
+    let config = result.expect("Expected result to be ok.");
+    println!("{}", config);
+
+    assert_eq!(config.version, "1.0.2");
+    assert_eq!(config.window.width, 320);
+    assert_eq!(config.window.height, 240);
+    assert_eq!(config.window.fullscreen, true);
+    assert_eq!(config.volume.sfx, 100.0);
+    assert_eq!(config.volume.music, 50.0);
+    assert_eq!(config.default_controller_idx, Some(0));
+    let controller1 = config.controllers.get("left_handed");
+    let controller2 = config.controllers.get("standard");
+
+    assert!(controller1.is_some());
+    assert!(controller2.is_some());
+
+    let left_handed = controller1.unwrap();
+    assert_eq!(left_handed.invert_y, false);
+    assert_eq!(*left_handed.keys.get("A").unwrap(), 13);
+    assert_eq!(*left_handed.keys.get("Z").unwrap(), 1);
+    assert_eq!(*left_handed.keys.get("X").unwrap(), 54);
+
+    let standard = controller2.unwrap();
+    assert_eq!(standard.invert_y, true);
+    assert_eq!(*standard.keys.get("SPACE").unwrap(), 100);
+    assert_eq!(*standard.keys.get("RIGHT").unwrap(), 101);
+    assert_eq!(*standard.keys.get("LEFT").unwrap(), 213);
+
+    println!("Done!");
+}
 
 struct Window {
     width: u16,
@@ -20,13 +80,15 @@ struct Volume {
 }
 
 struct Controller {
+    name: String,
     keys: HashMap<String, u8>,
     invert_y: bool,
 }
 
 impl Controller {
-    fn new() -> Self {
+    fn new(name: &str) -> Self {
         Self {
+            name: name.to_owned(),
             keys: HashMap::new(),
             invert_y: false,
         }
@@ -73,6 +135,43 @@ struct Config {
     version: String,
 }
 
+impl fmt::Display for Config {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "version={}", self.version)?;
+        writeln!(
+            f,
+            "window={{width={}, height={}, fullscreen={}}}",
+            self.window.width, self.window.height, self.window.fullscreen
+        )?;
+        writeln!(
+            f,
+            "volume={{sfx={}, music={}}}",
+            self.volume.sfx, self.volume.music
+        )?;
+        writeln!(f, "lang={}", self.lang)?;
+
+        for (name, c) in &self.controllers {
+            writeln!(f, "controller {}", name)?;
+            writeln!(f, "   invert_y={}", c.invert_y)?;
+            for (action, code) in &c.keys {
+                writeln!(f, "   key={{{} => {}}}", action, code)?;
+            }
+        }
+
+        writeln!(
+            f,
+            "default_controller_idx={}",
+            if let Some(idx) = self.default_controller_idx {
+                idx.to_string()
+            } else {
+                "None".to_string()
+            }
+        )?;
+
+        Ok(())
+    }
+}
+
 impl Config {
     fn new() -> Self {
         Self {
@@ -96,6 +195,7 @@ impl Config {
 struct ConfigBuilder {
     section: Sections,
     config: Config,
+    controller: Option<Controller>,
 }
 
 impl ConfigBuilder {
@@ -105,6 +205,7 @@ impl ConfigBuilder {
         let mut builder = ConfigBuilder {
             section: Sections::Unsupported,
             config: Config::new(),
+            controller: None,
         };
 
         for result in results {
@@ -128,6 +229,9 @@ impl ConfigBuilder {
                 }
             }
         }
+
+        // Flush or commit any staged elements being built before end of file.
+        builder.commit_controller();
 
         Ok(builder.config)
     }
@@ -278,58 +382,49 @@ impl ConfigBuilder {
             "controls" => self.handle_new_controls(&line_number, &attrs, &element)?,
             "invert_y" => {
                 // We must have a previous entry by this element.
-                if self.config.controllers.is_empty() {
+                if let Some(ref mut c) = self.controller {
+                    c.invert_y = true;
+                } else {
                     return Err(format!(
                         "#{}: Expected a controls entry before property {}.",
                         line_number, label
                     )
                     .into());
                 }
-
-                self.config
-                    .controllers
-                    .iter_mut()
-                    .last()
-                    .unwrap()
-                    .1
-                    .invert_y = true;
             }
             "key" => {
                 // We must have a previous entry by this element.
-                if self.config.controllers.is_empty() {
-                    return Err(format!(
-                        "#{}: Expected a controls entry before property {}.",
-                        line_number, label
-                    )
-                    .into());
-                }
-
-                // We expect 2 positional arguments
-                let args = &element.args;
-                if args.len() != 2 {
-                    return Err(format!(
+                if let Some(ref mut c) = self.controller {
+                    // We expect 2 positional arguments
+                    let args = &element.args;
+                    if args.len() != 2 {
+                        return Err(format!(
                         "#{}: key property expects the following format: `key <action> <code>`.",
                         line_number
                     )
-                    .into());
-                }
+                        .into());
+                    }
 
-                let iter = &mut args.iter();
-                let first = iter.nth(0).unwrap();
-                let second = iter.nth(1).unwrap();
+                    let iter = &mut args.iter();
+                    let first = iter.nth(0).unwrap();
+                    let second = iter.nth(0).unwrap();
 
-                // Enforce position arguments.
-                // Alternatively, a reader could check for
-                // keyval names before enforcing positions.
-                if first.is_nameless() && second.is_nameless() {
-                    let controller = self.config.controllers.iter_mut().last().unwrap().1;
-                    controller
-                        .keys
-                        .insert(first.val.clone(), second.val.parse::<u8>()?);
-                } else {
-                    return Err(format!(
+                    // Enforce position arguments.
+                    // Alternatively, a reader could check for
+                    // keyval names before enforcing positions.
+                    if first.is_nameless() && second.is_nameless() {
+                        c.keys.insert(first.val.clone(), second.val.parse::<u8>()?);
+                    } else {
+                        return Err(format!(
                         "#{}: key property fields do not match expected format: `key <action> <code>`.",
                         line_number
+                    )
+                    .into());
+                    }
+                } else {
+                    return Err(format!(
+                        "#{}: Expected a controls entry before property {}.",
+                        line_number, label
                     )
                     .into());
                 }
@@ -376,7 +471,11 @@ impl ConfigBuilder {
             arg.val.clone()
         };
 
-        self.config.controllers.insert(name, Controller::new());
+        // Stash the previous one
+        self.commit_controller();
+
+        // And track a new one
+        self.controller = Some(Controller::new(&name.clone()));
 
         // Attributes can apply special behavior to elements.
         if !attrs.is_empty() {
@@ -384,7 +483,8 @@ impl ConfigBuilder {
             // in this example.
             for attr in attrs {
                 if attr.text == "default" {
-                    self.config.default_controller_idx = Some(self.config.controllers.len() - 1)
+                    // len is also the next controller's index once commited
+                    self.config.default_controller_idx = Some(self.config.controllers.len())
                 }
             }
         }
@@ -395,15 +495,7 @@ impl ConfigBuilder {
     fn update_section(&mut self, text: &String) -> Sections {
         let next_section = Sections::from_text(text);
 
-        // Unsupported is the initial state of our config builder.
-        // When we have a valid first section, adopt this as our
-        // new state.
-        if self.section == Sections::Unsupported {
-            self.section = next_section;
-            return self.section.clone();
-        }
-
-        // It's likely this is an expected element for the current section.
+        // It's likely this is an expected element for a subsection.
         // More robust validation could be done here but this is only for
         // example purposes and will suffice.
         if next_section == Sections::Unsupported {
@@ -411,8 +503,9 @@ impl ConfigBuilder {
             return self.section.clone();
         }
 
-        // Process the next section
-        next_section
+        // Switch to and process the next section.
+        self.section = next_section;
+        self.section.clone()
     }
 
     // The YES spec states that global elements impact the whole document.
@@ -446,42 +539,10 @@ impl ConfigBuilder {
 
         Ok(())
     }
-}
 
-fn main() {
-    let doc = "!version 1.0.2
-        window width=320 height=240 fullscreen
-        volume sfx=100 music=50
-        lang en
-
-        @default
-        controls pad_1
-            key A 13
-            key Z 1
-            key LEFT 54
-            # etc...
-
-        controls keyboard
-            invert_y
-            key A 100
-            key Z 101
-            key LEFT 213
-            # etc...";
-
-    let result = ConfigBuilder::from_string(doc);
-
-    match &result {
-        Err(e) => println!("{}", e),
-        _ => (),
+    fn commit_controller(&mut self) {
+        if let Some(c) = self.controller.take() {
+            self.config.controllers.insert(c.name.clone(), c);
+        }
     }
-
-    assert!(result.is_ok());
-
-    let config = result.expect("Expected result to be ok.");
-    assert_eq!(config.version, "1.0.2");
-    assert_eq!(config.window.width, 320);
-    assert_eq!(config.window.height, 240);
-    assert_eq!(config.window.fullscreen, true);
-
-    println!("Done!");
 }
