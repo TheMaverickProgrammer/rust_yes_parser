@@ -203,6 +203,7 @@ impl YesDocParser {
                 element_parser.line_number,
                 element_parser.error.unwrap(),
             ));
+            return;
         }
 
         let consumed = match element_parser.element {

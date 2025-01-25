@@ -1,6 +1,10 @@
 use std::collections::HashMap;
 
-use yes_parser::{element::Element, enums::Elements, YesDocParser};
+use yes_parser::{
+    element::Element,
+    enums::{Elements, ErrorCodes},
+    YesDocParser,
+};
 
 extern crate yes_parser;
 
@@ -111,8 +115,17 @@ impl ConfigBuilder {
                 yes_parser::ParseResult::Err {
                     line_number,
                     message,
-                    code: _,
-                } => return Err(format!("#{}: {}", line_number, message).into()),
+                    code,
+                } => {
+                    // The spec must report why it could not parse something.
+                    // Generally EOL can be ignored safely depending on your
+                    // expectations for your documents and scripts.
+                    if code == ErrorCodes::EolNoData {
+                        continue;
+                    }
+
+                    return Err(format!("#{}: {}", line_number, message).into());
+                }
             }
         }
 
@@ -151,7 +164,10 @@ impl ConfigBuilder {
             // of those rules. In production, move the parsing code into its own file
             // to improve readability and make responsibility clear.
             Sections::Controls => self.handle_controls_section(&line_number, &attrs, &element)?,
-            Sections::Unsupported => panic!("Expected the section to be well-defined!"),
+            Sections::Unsupported => Err(format!(
+                "#{}: Unexpected section {}!",
+                line_number, element.text
+            ))?,
         }
         Ok(())
     }
@@ -376,8 +392,16 @@ impl ConfigBuilder {
         Ok(())
     }
 
-    fn update_section(&self, text: &String) -> Sections {
+    fn update_section(&mut self, text: &String) -> Sections {
         let next_section = Sections::from_text(text);
+
+        // Unsupported is the initial state of our config builder.
+        // When we have a valid first section, adopt this as our
+        // new state.
+        if self.section == Sections::Unsupported {
+            self.section = next_section;
+            return self.section.clone();
+        }
 
         // It's likely this is an expected element for the current section.
         // More robust validation could be done here but this is only for
@@ -445,6 +469,12 @@ fn main() {
             # etc...";
 
     let result = ConfigBuilder::from_string(doc);
+
+    match &result {
+        Err(e) => println!("{}", e),
+        _ => (),
+    }
+
     assert!(result.is_ok());
 
     let config = result.expect("Expected result to be ok.");
@@ -452,4 +482,6 @@ fn main() {
     assert_eq!(config.window.width, 320);
     assert_eq!(config.window.height, 240);
     assert_eq!(config.window.fullscreen, true);
+
+    println!("Done!");
 }
