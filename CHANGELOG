@@ -1,5 +1,14 @@
+# 1.0.2
+
+- Space-delimited parsing now consumes trailing blank characters correctly after parsing a keyvalue.
+- Added test for the above case.
+- Added `fmt::Display` trait for `Element` struct which provides `ToString`. Added a test for this feature.
+- Ran `rustup upgrade` to use latest toolchain.
+
 # 1.0.1
-Forgot to checkin an updated cargo toml with more information.
+
+- Forgot to checkin an updated cargo toml with more information.
 
 # 1.0.0
-Initial release
+
+- Initial release

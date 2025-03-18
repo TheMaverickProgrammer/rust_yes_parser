@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
 use crate::keyval::KeyVal;
 
@@ -111,5 +111,12 @@ impl Element {
         }
 
         or
+    }
+}
+
+
+impl fmt::Display for Element {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} args={{{}}}", self.text, self.args.iter().map(|a| a.to_string()).collect::<Vec<String>>().join(", "))
     }
 }

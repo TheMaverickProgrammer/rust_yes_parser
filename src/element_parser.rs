@@ -456,6 +456,10 @@ impl ElementParser {
 
                     curr += 1;
                     last_token_idx = curr;
+
+                    while curr < len && slice[curr] == Glyphs::Space.value() {
+                        curr+=1;
+                    }
                     continue;
                 }
 

@@ -244,6 +244,27 @@ mod tests {
     use crate::{enums::Elements, literal::Literal, ParseResult, YesDocParser};
 
     #[test]
+    fn element_to_string() {
+        let content = "foo a=bar b=rey c=doh";
+        let results = YesDocParser::from_string(content, Some(vec![Literal::build_quotes()]));
+
+        assert_eq!(results.len(), 1);
+
+        let first = results.first();
+        assert_eq!(first.is_some(), true);
+
+        let element = match &first.unwrap() {
+            ParseResult::Ok {
+                line_number: _,
+                data: Elements::Standard{element, ..},
+            } => element,
+            _ => panic!("Element expected!"),
+        };
+
+        assert_eq!(element.to_string(), "foo args={a=bar, b=rey, c=doh}");
+    }
+
+    #[test]
     fn parse_macro_content() {
         let content = "!macro teardown_textbox(tb) = \"call common.textbox_teardown tb=\"tb";
         let results: Vec<ParseResult> =
@@ -334,7 +355,7 @@ mod tests {
     }
 
     #[test]
-    fn delimiter_test1() {
+    fn space_delimiter_test() {
         let content = "x a=b -c";
         let results = YesDocParser::from_string(content, None);
         assert_eq!(results.len(), 1);
@@ -361,6 +382,47 @@ mod tests {
         let arg2 = element.args.iter().nth(1).unwrap();
         assert_eq!(arg2.key.is_none(), true);
         assert_eq!(arg2.val, "-c");
+    }
+
+    #[test]
+    fn spaces_consume_delimiter_test() {
+        let content = "x   a=b\\\n   -c  d=\\\ne     +f";
+                                  
+        let results = YesDocParser::from_string(content, None);
+
+        assert_eq!(results.len(), 1);
+
+        let first = results.first();
+        assert_eq!(first.is_some(), true);
+
+        let element = match &first.unwrap() {
+            ParseResult::Ok {
+                line_number: _,
+                data: Elements::Standard { attrs: _, element },
+            } => element,
+            _ => panic!("Standard element expected!"),
+        };
+
+        assert_eq!(element.text, "x");
+        assert_eq!(element.args.len(), 4);
+
+        let arg1 = element.args.iter().nth(0).unwrap();
+        assert_eq!(arg1.key.is_some(), true);
+        assert_eq!(arg1.key.as_ref().unwrap(), "a");
+        assert_eq!(arg1.val, "b");
+
+        let arg2 = element.args.iter().nth(1).unwrap();
+        assert_eq!(arg2.key.is_none(), true);
+        assert_eq!(arg2.val, "-c");
+        
+        let arg3 = element.args.iter().nth(2).unwrap();
+        assert_eq!(arg3.key.is_some(), true);
+        assert_eq!(arg3.key.as_ref().unwrap(), "d");
+        assert_eq!(arg3.val, "e");
+
+        let arg4 = element.args.iter().nth(3).unwrap();
+        assert_eq!(arg4.key.is_none(), true);
+        assert_eq!(arg4.val, "+f");
     }
 
     #[test]

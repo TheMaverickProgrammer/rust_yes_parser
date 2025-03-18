@@ -1,5 +1,3 @@
-use std::fmt;
-
 use crate::{enums::Glyphs, utils::StringUtils};
 
 pub struct KeyVal {
@@ -31,8 +29,8 @@ impl KeyVal {
     }
 }
 
-impl fmt::Display for KeyVal {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl ToString for KeyVal {
+    fn to_string(&self) -> String {
         let v = match self.value_contains_space {
             true => {
                 let mut clone = self.val.clone();
@@ -43,7 +41,7 @@ impl fmt::Display for KeyVal {
         };
 
         if self.is_nameless() {
-            return write!(f, "{}", v);
+            return format!("{}", v);
         }
 
         let k = match self.key_contains_space {
@@ -55,6 +53,6 @@ impl fmt::Display for KeyVal {
             false => self.key.clone().unwrap(),
         };
 
-        write!(f, "{}={}", k, v)
+        format!("{}={}", k, v)
     }
 }
